@@ -1,3 +1,20 @@
 AddMul {
- // Write the rules here
+      Exp
+    = AddExp
+
+  AddExp = MulExp ("+" AddExp)?
+    // | MulExp
+
+  MulExp
+    = PriExp "*" MulExp  -- times
+    | PriExp
+
+  PriExp
+    = "(" Exp ")"  -- paren
+    | number
+
+  number  (a number)
+    = digit+           
 }
+
+//digit (a digit) = "0".."9"
