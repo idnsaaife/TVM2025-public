@@ -3,11 +3,9 @@ AddMul {
     = AddExp
 
   AddExp = MulExp ("+" AddExp)?
-    // | MulExp
 
   MulExp
-    = PriExp "*" MulExp  -- times
-    | PriExp
+    = PriExp ("*" MulExp)?
 
   PriExp
     = "(" Exp ")"  -- paren

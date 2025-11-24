@@ -9,16 +9,25 @@ export function evaluate(content: string, params?: {[name:string]:number}): numb
 {
     return calculate(parse(content), params ?? {});
 }
-export class SyntaxError extends Error
-{
+
+
+export class SyntaxError extends Error {
 }
 
-export function parse(content: string): MatchResult
-{
-    throw "Not implemented";
+export function parse(content: string): MatchResult {
+    const match = grammar.match(content);
+    if (match.failed()) {
+        throw new SyntaxError(match.message);
+    }
+    return match;
 }
 
-function calculate(expression: MatchResult, params: {[name:string]: number}): number
-{
-    throw "Not implemented";
+function calculate(expression: MatchResult, params: { [name: string]: number }): number {
+    const result = arithSemantics(expression).calculate(params);
+
+    if (Number.isNaN(result)) {
+        return NaN;
+    }
+
+    return result;
 }

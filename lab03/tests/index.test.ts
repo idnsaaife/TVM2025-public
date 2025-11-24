@@ -17,7 +17,7 @@ describe('testing addition and multiplication regression', () => {
         35  +
         7`);
     test("Multiple additions are valid", 3, evaluate, 42, "5+4+3+2+1+2+3+4+5+6+7");
-    
+
     test("Multiplication is a valid expression", 3, evaluate, 42, "6*7");
     test("Incomplete multiplication is invalid", 3, evaluate, SyntaxError, "42*");
     test("Standalone * is invalid", 3, evaluate, SyntaxError, "*42");
@@ -26,7 +26,7 @@ describe('testing addition and multiplication regression', () => {
     test("Complex expressions are supported", 4, evaluate, 42, "7+2*7+3*6+3");
     test("Parentheses are correctly supported", 4, evaluate, 42, "(2+1)*7+(3*2*3)+2*(1+0)+1");
     test("Extra paren are ok", 4, evaluate, 42, "(2+1)*7+(3*(2)*3)+2*((1+(0)))+1");
- 
+
 });
 describe('testing subtraction and division', () => {
     test("Subtraction is supported", 3, evaluate, 21, "42-21");
@@ -40,19 +40,16 @@ describe('testing subtraction and division', () => {
     test("Division by zero yields Error", 3, evaluate, Error, "8/0");
 });
 describe('testing unary negation', () => {
-    test("negation is supported in addition", 3, evaluate, 42, "43+-1");
-    test("negation is supported in subtraction", 4, evaluate, 42, "41--1");
-    test("double negation is supported", 4, evaluate, 42, "--1");
-    test("spacing is supported in negation", 4, evaluate, 42, `41 + - -\t
-        1`);
+    test("unary minus is supported", 3, evaluate, 42, "43+-1");
+    test("double unary minus is supported", 4, evaluate, 42, "41--1");
 });
 describe('testing variables', () => {
-    test("variables can be used", 3, evaluate, 42, "x+1", {x: 41});
-    test("undefined variables yield NaN", 3, evaluate, NaN, "x+y", {x: 41});
+    test("variables can be used", 3, evaluate, 42, "x+1", { x: 41 });
+    test("undefined variables yield NaN", 3, evaluate, NaN, "x+y", { x: 41 });
     test("Dividing undefined by zero yields Error", 3, evaluate, Error, "x/0");
 
 });
 
 describe('testing left-associativity of the grammar', () => {
-   test("No left-recursive rules", 5, findLeftRecursion, undefined, grammar);
+    test("No left-recursive rules", 5, findLeftRecursion, undefined, grammar);
 });

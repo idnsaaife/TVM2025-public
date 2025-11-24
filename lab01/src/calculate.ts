@@ -13,8 +13,10 @@ const addMulCalc = {
             ? y.children[0].calculate()
             : 0);
     }, 
-    MulExp_times(x, _times, y) {
-        return x.calculate() * y.calculate();
+    MulExp(x, _times, y) {
+        return x.calculate() * (y.numChildren > 0
+            ? y.children[0].calculate()
+            : 1);
     },
     PriExp_paren(_open, e, _close) {
         return e.calculate();
