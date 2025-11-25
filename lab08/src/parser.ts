@@ -3,23 +3,44 @@ import * as ast from './funny';
 import grammar, { FunnyActionDict } from './funny.ohm-bundle';
 import { MatchResult, Semantics } from 'ohm-js';
 
+
+const functionInfo = new Map<string, {
+    paramCount: number,
+    returnCount: number}>();
+
 const getFunnyAst = {
+
     ...getExprAst,
 
     Module(items) {
         const functions = items.children.map((x: any) => x.parse());
-        
+        const functionParams = new Map<string, number>();
+        functions.forEach((func: ast.FunctionDef) => {
+            functionInfo.set(func.name, {
+                paramCount: func.parameters.length,
+                returnCount: func.returns.length
+            });
+        });
+
         return { type: "module", functions: functions } as ast.Module;
     },
 
 
+    UsesClause(_uses, list) {
+        return list.parse();
+    },
+
     Function(header, body) {
         const [name, _l1, params, _r1, _returns, returnsList, usesClause] = header.children;
-        const parameters = params.asIteration().children.map(x => x.parse() as ast.ParameterDef);
-        const returns = returnsList.asIteration().children.map(x => x.parse()) as ast.ParameterDef[];
-        const locals = usesClause.children.length
-            ? usesClause.child(0).asIteration().children.map((c: any) => c.parse())
+        const parameters = params.children.length > 0
+            ? params.child(0).asIteration().children.map(x => x.parse() as ast.ParameterDef)
             : [];
+        const returns = returnsList.asIteration().children.map(x => x.parse()) as ast.ParameterDef[];
+        const locals = usesClause.children.length > 0
+            ? usesClause.child(0).parse()
+            : [];
+        
+        
         return {
             type: 'fun',
             name: name.sourceString,
@@ -34,7 +55,6 @@ const getFunnyAst = {
         return [name, _l1, params, _r1, _returns, returnsList, usesClause];
     },
 
-    // === Формула ===
     Formula(name, _l, params, _r, _arrow, pred, _semi) {
         const parameters = params.children.length ? params.child(0).parse() : [];
         return {
@@ -50,12 +70,6 @@ const getFunnyAst = {
         return params;
     },
 
-
-    UsesClause(uses_str, list) {
-        const params = list.asIteration().children.map((c: any) => c.parse());
-        return params;
-    },
-
     Param(name, _colon, type) {
         return {
             type: 'param',
@@ -64,7 +78,6 @@ const getFunnyAst = {
         } as ast.ParameterDef;
     },
 
-    // === Операторы ===
     Block(_open, stmts, _close) {
         return { type: 'block', statements: stmts.children.map(s => s.parse()) } as ast.BlockStmt;
     },
@@ -101,8 +114,27 @@ const getFunnyAst = {
         return { kind: 'index', array: arr.sourceString, index: idx.parse() } as ast.LValue;
     },
 
+    NonemptyListOf(first, sep, rest) {
+        const result = [first.parse()];
+        if (rest.children.length > 0) {
+            const restItems = rest.asIteration().children.map((child: any) =>
+                child.child(1).parse()
+            );
+            result.push(...restItems);
+        }
+        return result;
+    },
+
+    ListOf(nonemptyList) {
+        return nonemptyList.parse();
+    },
+    
+    EmptyListOf() {
+        return [];
+    },
+
     Conditional(_if, _lp, cond, _rp, thenStmt, _else, elseClause) {
-        const elseStmt = elseClause.children.length ? elseClause.child(1).parse() : undefined;
+        const elseStmt = elseClause.children.length ? elseClause.child(0).parse() : undefined;
         return {
             type: 'if',
             condition: { type: 'pred', source: cond.sourceString },
@@ -124,13 +156,33 @@ const getFunnyAst = {
     },
 
     FunctionCall(name, _lp, args, _rp) {
-        const argNodes = args.children.length > 0 ? args.asIteration().children.map((x: any) => x.parse()) : [];
+        const argNodes = args.children.length > 0 ? args.parse() : [];
         const nameStr = name.sourceString;
+
+        const func = functionInfo.get(nameStr);
+        if (func && func.paramCount !== argNodes.length) {
+            throw new Error(
+                `Argument count mismatch for function '${nameStr}': expected ${func.paramCount}, got ${argNodes.length}`
+            );
+        }
+
+        argNodes.forEach((arg: any) => {
+            if (arg.type === 'call') {
+                const calledFunc = functionInfo.get(arg.name);
+                if (calledFunc && calledFunc.returnCount !== 1) {
+                    throw new Error(
+                        `Function '${arg.name}' returns ${calledFunc.returnCount} value(s), but 1 expected in argument`
+                    );
+                }
+            }
+        });
+
         return {
-            type: "call", name: nameStr, args: argNodes
+            type: "call",
+            name: nameStr,
+            args: argNodes
         } as ast.CallExpr;
     },
-
 
     ArrayAccess(arr, _lb, idx, _rb) {
         return { type: 'index', array: arr.sourceString, index: idx.parse() };
@@ -163,12 +215,79 @@ export function parseFunny(source: string): ast.Module {
     console.log(source);
 
     const match = grammar.Funny.match(source, 'Module');
+    
     console.log('Match result:', match.succeeded());
     if (match.failed()) {
         console.log('Match failed at:', match.message);
         throw new SyntaxError(match.message);
     }
-
+    const module = semantics(match).parse();
     console.log('Match succeeded, creating AST...');
-    return semantics(match).parse();
+    validateFunctionCalls(module);
+    return module;
+}
+
+function validateFunctionCalls(module: ast.Module) {
+    function checkExpr(expr: any): void {
+        if (!expr) return;
+
+        if (expr.type === 'call') {
+            const func = functionInfo.get(expr.name);
+
+            if (!func) {
+                throw new Error(`Call to undeclared function '${expr.name}'`);
+            }
+
+            if (func.paramCount !== expr.args.length) {
+                throw new Error(
+                    `Argument count mismatch for function '${expr.name}': expected ${func.paramCount}, got ${expr.args.length}`
+                );
+            }
+
+            expr.args.forEach((arg: any) => {
+                checkExpr(arg);
+                if (arg.type === 'call') {
+                    const argFunc = functionInfo.get(arg.name);
+                    if (argFunc && argFunc.returnCount !== 1) {
+                        throw new Error(
+                            `Function '${arg.name}' returns ${argFunc.returnCount} value(s), but 1 expected`
+                        );
+                    }
+                }
+            });
+        } else if (expr.type === 'index') {
+            checkExpr(expr.index);
+        } else if (expr.type === 'binary') {
+            checkExpr(expr.left);
+            checkExpr(expr.right);
+        } else if (expr.type === 'unary') {
+            checkExpr(expr.operand);
+        }
+    }
+
+    function checkStmt(stmt: any): void {
+        if (!stmt) return;
+
+        if (stmt.type === 'assign') {
+            stmt.lhs.forEach((lval: any) => {
+                if (lval.kind === 'index') {
+                    checkExpr(lval.index);
+                }
+            });
+            stmt.rhs.forEach((expr: any) => checkExpr(expr));
+        } else if (stmt.type === 'block') {
+            stmt.statements.forEach((s: any) => checkStmt(s));
+        } else if (stmt.type === 'if') {
+            checkStmt(stmt.thenBranch);
+            if (stmt.elseBranch) checkStmt(stmt.elseBranch);
+        } else if (stmt.type === 'while') {
+            checkStmt(stmt.body);
+        } else if (stmt.type === 'returns') {
+            stmt.values.forEach((v: any) => checkExpr(v));
+        }
+    }
+
+    module.functions.forEach(func => {
+        checkStmt(func.body);
+    });
 }
