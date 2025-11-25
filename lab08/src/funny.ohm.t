@@ -7,10 +7,11 @@ Funny <: Arithmetic {
   // === Функция ===
   Function = FunctionHeader Statement
 
-  FunctionHeader = ident "(" ParamList ")" "returns" NonemptyListOf<Param, ","> UsesClause?
+  FunctionHeader = ident "(" ParamList ")" "returns" ParamListNonEmpty UsesClause?
 
   ParamList    = ListOf<Param, ",">
-  UsesClause   = "uses" ListOf<Param, ",">
+  ParamListNonEmpty = NonemptyListOf<Param, ",">
+  UsesClause   = "uses" ParamList
 
   Param = ident ":" Type
   Type = "int[]" -- array

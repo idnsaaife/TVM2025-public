@@ -14,7 +14,6 @@ const getFunnyAst = {
 
     Module(items) {
         const functions = items.children.map((x: any) => x.parse());
-        const functionParams = new Map<string, number>();
         functions.forEach((func: ast.FunctionDef) => {
             functionInfo.set(func.name, {
                 paramCount: func.parameters.length,
@@ -32,13 +31,9 @@ const getFunnyAst = {
 
     Function(header, body) {
         const [name, _l1, params, _r1, _returns, returnsList, usesClause] = header.children;
-        const parameters = params.children.length > 0
-            ? params.child(0).asIteration().children.map(x => x.parse() as ast.ParameterDef)
-            : [];
-        const returns = returnsList.asIteration().children.map(x => x.parse()) as ast.ParameterDef[];
-        const locals = usesClause.children.length > 0
-            ? usesClause.child(0).parse()
-            : [];
+        const parameters = params.parse();
+        const returns = returnsList.parse();
+        const locals = usesClause.numChildren > 0 ? usesClause.children[0].parse() : [];
         
         
         return {
@@ -68,6 +63,14 @@ const getFunnyAst = {
     ParamList(list) {
         const params = list.asIteration().children.map((c: any) => c.parse());
         return params;
+    },
+
+    ParamListNonEmpty(list) {
+        return list.asIteration().children.map((c: any) => c.parse());
+    },
+
+    ArgList(list) {
+        return list.asIteration().children.map((c: any) => c.parse());
     },
 
     Param(name, _colon, type) {
@@ -112,25 +115,6 @@ const getFunnyAst = {
 
     LValue_index(arr, _lb, idx, _rb) {
         return { kind: 'index', array: arr.sourceString, index: idx.parse() } as ast.LValue;
-    },
-
-    NonemptyListOf(first, sep, rest) {
-        const result = [first.parse()];
-        if (rest.children.length > 0) {
-            const restItems = rest.asIteration().children.map((child: any) =>
-                child.child(1).parse()
-            );
-            result.push(...restItems);
-        }
-        return result;
-    },
-
-    ListOf(nonemptyList) {
-        return nonemptyList.parse();
-    },
-    
-    EmptyListOf() {
-        return [];
     },
 
     Conditional(_if, _lp, cond, _rp, thenStmt, _else, elseClause) {
@@ -223,6 +207,7 @@ export function parseFunny(source: string): ast.Module {
     }
     const module = semantics(match).parse();
     console.log('Match succeeded, creating AST...');
+    validateFunctionDefinitions(module);
     validateFunctionCalls(module);
     return module;
 }
@@ -290,4 +275,114 @@ function validateFunctionCalls(module: ast.Module) {
     module.functions.forEach(func => {
         checkStmt(func.body);
     });
+}
+function validateFunctionDefinitions(module: ast.Module) {
+    module.functions.forEach(func => {
+        const paramNames = new Set<string>();
+        func.parameters.forEach(param => {
+            if (paramNames.has(param.name)) {
+                throw new Error(`Duplicate parameter name '${param.name}' in function '${func.name}'`);
+            }
+            paramNames.add(param.name);
+        });
+
+
+        const returnNames = new Set<string>();
+        func.returns.forEach(ret => {
+            if (returnNames.has(ret.name)) {
+                throw new Error(`Duplicate return variable name '${ret.name}' in function '${func.name}'`);
+            }
+            returnNames.add(ret.name);
+        });
+
+        const localNames = new Set<string>();
+        func.locals.forEach(local => {
+            if (localNames.has(local.name)) {
+                throw new Error(`Duplicate local variable name '${local.name}' in function '${func.name}'`);
+            }
+            localNames.add(local.name);
+        });
+
+        func.locals.forEach(local => {
+            if (paramNames.has(local.name)) {
+                throw new Error(`Local variable '${local.name}' conflicts with parameter in function '${func.name}'`);
+            }
+        });
+
+        func.locals.forEach(local => {
+            if (returnNames.has(local.name)) {
+                throw new Error(`Local variable '${local.name}' conflicts with return variable in function '${func.name}'`);
+            }
+        });
+
+        func.returns.forEach(ret => {
+            if (paramNames.has(ret.name)) {
+                throw new Error(`Return variable '${ret.name}' conflicts with parameter in function '${func.name}'`);
+            }
+        });
+
+        const declaredVars = new Set<string>();
+        func.parameters.forEach(p => declaredVars.add(p.name));
+        func.returns.forEach(r => declaredVars.add(r.name));
+        func.locals.forEach(l => declaredVars.add(l.name));
+
+        checkUndeclaredVariables(func.body, declaredVars, func.name);
+    });
+}
+
+function checkUndeclaredVariables(stmt: any, declaredVars: Set<string>, funcName: string): void {
+    function checkExpr(expr: any): void {
+        if (!expr) return;
+
+        if (expr.type === 'variable') {
+            if (!declaredVars.has(expr.name)) {
+                throw new Error(`Undeclared variable '${expr.name}' in function '${funcName}'`);
+            }
+        } else if (expr.type === 'index') {
+            if (!declaredVars.has(expr.array)) {
+                throw new Error(`Undeclared variable '${expr.array}' in function '${funcName}'`);
+            }
+            checkExpr(expr.index);
+        } else if (expr.type === 'binary') {
+            checkExpr(expr.left);
+            checkExpr(expr.right);
+        } else if (expr.type === 'unary') {
+            checkExpr(expr.operand);
+        } else if (expr.type === 'call') {
+            expr.args.forEach((arg: any) => checkExpr(arg));
+        }
+    }
+
+    function checkLValue(lval: any): void {
+        if (lval.kind === 'var') {
+            if (!declaredVars.has(lval.name)) {
+                throw new Error(`Undeclared variable '${lval.name}' in function '${funcName}'`);
+            }
+        } else if (lval.kind === 'index') {
+            if (!declaredVars.has(lval.array)) {
+                throw new Error(`Undeclared variable '${lval.array}' in function '${funcName}'`);
+            }
+            checkExpr(lval.index);
+        }
+    }
+
+    function checkStmt(s: any): void {
+        if (!s) return;
+
+        if (s.type === 'assign') {
+            s.lhs.forEach((lval: any) => checkLValue(lval));
+            s.rhs.forEach((expr: any) => checkExpr(expr));
+        } else if (s.type === 'block') {
+            s.statements.forEach((stmt: any) => checkStmt(stmt));
+        } else if (s.type === 'if') {
+            checkStmt(s.thenBranch);
+            if (s.elseBranch) checkStmt(s.elseBranch);
+        } else if (s.type === 'while') {
+            checkStmt(s.body);
+        } else if (s.type === 'returns') {
+            s.values.forEach((v: any) => checkExpr(v));
+        }
+    }
+
+    checkStmt(stmt);
 }
